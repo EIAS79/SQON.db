@@ -1,0 +1,1 @@
+{"root":["../../lib/adapters/crud.ts","../../lib/adapters/graph.ts","../../lib/adapters/sqon_query.ts","../../lib/adapters/vectors.ts","../../lib/core/sqon.ts","../../lib/functions/colors.ts","../../lib/functions/loggers.ts","../../lib/functions/utils.ts","../../lib/types/core.ts","../../lib/types/logger.ts","../../lib/types/utiles.ts"],"version":"5.7.2"}
