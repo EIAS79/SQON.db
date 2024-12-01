@@ -1,6 +1,6 @@
 import { SqonDbConfig, SecureOptions, RestrictionsOptions, AdapterResults } from '../Types/utiles';
 import { join, resolve, extname  } from 'path';
-import Logger from '../Functions/loggers'; // Importing the custom Logger class
+import Logger from '../Functions/loggers';
 
 export class sqon_db {
     public DirPath: string;
@@ -15,7 +15,7 @@ export class sqon_db {
       this.restrictions = config.restrictions;
       
     }
-  
+
     public getFile(fileName: string): string {
         let fullPath = resolve(this.DirPath);
     

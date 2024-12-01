@@ -13,4 +13,3 @@
     "include": ["./lib/"],
     "exclude": ["node_modules"]
   }
-  

@@ -1,4 +1,4 @@
-type SecureOptions = {
+  type SecureOptions = {
     enable: boolean;
     secret: string;
   };
