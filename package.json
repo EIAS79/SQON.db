@@ -1,10 +1,10 @@
 {
-  "name": "sqon.db",
-  "version": "0.0.1",
-  "description": "Flexible & data manipulation for .sqon database files.",
-  "main": "./dist/cjs/sqon.js",
-  "module": "./dist/esm/sqon.js",
-  "types": "./dist/esm/sqon.d.ts",
+  "name": "nuvira.db",
+  "version": "0.0.2",
+  "description": "Flexible & data manipulation for .nuv database files.",
+  "main": "./dist/cjs/nuvira.js",
+  "module": "./dist/esm/nuvira.js",
+  "types": "./dist/esm/nuvira.d.ts",
   "exports": {
     ".": {
       "require": "./dist/cjs/index.js",
@@ -19,17 +19,17 @@
     "build:cjs": "tsc --build tsconfig.cjs.json --force",
     "build": "npm run clean && npm run build:esm && npm run build:cjs",
     "watch": "tsc -w",
-    "start": "node ./dist/cjs/sqon.js",
-    "dev": "ts-node ./lib/sqon.ts",
+    "start": "node ./dist/cjs/nuvira.js",
+    "dev": "ts-node ./lib/nuvira.ts",
     "publish:prep": "npm run build",
     "publish": "npm run publish:prep && npm publish"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/EIAS79/SQON.db.git"
+    "url": "https://github.com/EIAS79/nuvira.db.git"
   },
   "bugs": {
-    "url": "https://github.com/EIAS79/SQON.db/issues"
+    "url": "https://github.com/EIAS79/nuvira.db/issues"
   },
   "files": [
     "lib",
@@ -38,14 +38,20 @@
     "changelog.md"
   ],
   "devDependencies": {
+    "@types/lodash": "^4.17.13",
     "@types/node": "^22.10.1",
+    "@types/proper-lockfile": "^4.1.4",
+    "rimraf": "^5.0.10",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.2"
   },
   "dependencies": {
-    "lockfile": "^1.0.4",
+    "axios": "^1.7.9",
     "lodash": "^4.17.21",
-    "msgpack5": "^6.0.2",
-    "sqon-parser": "^1.1.2"
+    "ml-matrix": "^6.12.0",
+    "nuvira-parser": "^1.0.0",
+    "proper-lockfile": "^4.1.2",
+    "tsne-js": "^1.0.3",
+    "umap-js": "^1.4.0"
   }
 }

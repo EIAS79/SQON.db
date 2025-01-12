@@ -6,11 +6,12 @@ type RestrictionsOptions = {
     strictMode: boolean;
     dataLimit: number;
 };
-interface SqonDbConfig {
+interface NuviraDbConfig {
+    mode: "local" | "external";
     DirPath: string;
     logs?: {
-        enable: boolean;
-        logFile: string;
+        enable?: boolean;
+        logFile?: string;
     };
     secure?: SecureOptions;
     restrictions?: RestrictionsOptions;
@@ -21,5 +22,10 @@ type AdapterResults<T> = {
     errorMessage?: string;
     message?: string;
 };
-export { SqonDbConfig, SecureOptions, RestrictionsOptions, AdapterResults };
+interface NuviraHelper {
+    query?(): void;
+    crud?(): void;
+    vector?(): void;
+}
+export { NuviraDbConfig, SecureOptions, RestrictionsOptions, AdapterResults, NuviraHelper };
 //# sourceMappingURL=core.d.ts.map

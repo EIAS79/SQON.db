@@ -8,9 +8,10 @@
     dataLimit: number;
   };
   
-  interface SqonDbConfig {
+  interface NuviraDbConfig {
+    mode: "local" | "external" 
     DirPath: string;
-    logs?: { enable: boolean; logFile: string };
+    logs?: { enable?: boolean; logFile?: string };
     secure?: SecureOptions;
     restrictions?: RestrictionsOptions;
   }
@@ -22,4 +23,9 @@
     message?: string;
   };
 
-export { SqonDbConfig, SecureOptions, RestrictionsOptions, AdapterResults };
+  interface NuviraHelper {
+    query?(): void;  // Adjust the return type and parameters based on your actual methods
+    crud?(): void;   // Same for these
+    vector?(): void;
+  }
+export { NuviraDbConfig, SecureOptions, RestrictionsOptions, AdapterResults, NuviraHelper };

@@ -1,0 +1,432 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.nuv_crud = void 0;
+const fs = __importStar(require("fs"));
+const lockfile = __importStar(require("proper-lockfile"));
+const nuv_query_1 = require("./nuv_query");
+const loggers_1 = __importDefault(require("../Functions/loggers"));
+const nuvira_parser_1 = require("nuvira-parser");
+class WorkerPool {
+    tasks = [];
+    activeWorkers = 0;
+    maxWorkers;
+    constructor(maxWorkers) {
+        this.maxWorkers = maxWorkers;
+    }
+    async addTask(task) {
+        return new Promise((resolve, reject) => {
+            this.tasks.push(async () => {
+                try {
+                    await task();
+                    resolve();
+                }
+                catch (err) {
+                    reject(err);
+                }
+            });
+            this.processTasks();
+        });
+    }
+    async processTasks() {
+        if (this.activeWorkers >= this.maxWorkers || this.tasks.length === 0)
+            return;
+        this.activeWorkers++;
+        const task = this.tasks.shift();
+        try {
+            await task();
+        }
+        finally {
+            this.activeWorkers--;
+            this.processTasks();
+        }
+    }
+}
+class nuv_crud {
+    workerPool = new WorkerPool(10);
+    logger;
+    indexes = null;
+    queryClass;
+    indexField;
+    constructor(indexes, indexField) {
+        this.logger = new loggers_1.default();
+        this.indexes = indexes;
+        this.queryClass = new nuv_query_1.nuv_query(this.indexes);
+        this.indexField = indexField;
+    }
+    /**
+     * Adds a record or multiple records to the database.
+     * @param file The file to update.
+     * @param record The record(s) to add.
+     * @returns A promise that resolves to true if the operation is successful.
+     */
+    async addRecord(file, record) {
+        return new Promise((resolve, reject) => {
+            this.workerPool.addTask(async () => {
+                try {
+                    if (!this.indexes || !this.indexes.primary || !this.indexes.schema) {
+                        throw new Error('Indexes are not built or schema is missing. Please call buildIndex() first.');
+                    }
+                    const db = new nuvira_parser_1.Nuvira({ filePath: file });
+                    const schema = this.indexes.schema;
+                    const recordsToAdd = Array.isArray(record) ? record : [record];
+                    for (const rec of recordsToAdd) {
+                        const validationResult = await db.validateData({
+                            schema: schema,
+                            validateData: this.indexes.validations,
+                            data: rec,
+                            strict: this.indexes.fileRules?.Strict || false,
+                        });
+                        if (!validationResult.valid) {
+                            const errorMessages = validationResult.errors
+                                ?.map((error) => error.message || 'Unknown error')
+                                .join(', ');
+                            throw new Error(`Validation failed for record: ${errorMessages}`);
+                        }
+                    }
+                    await this.withLock(file, async () => {
+                        const tempFilePath = `${file}.tmp`;
+                        const readStream = fs.createReadStream(file, { encoding: 'utf-8' });
+                        const writeStream = fs.createWriteStream(tempFilePath, { encoding: 'utf-8' });
+                        let insideRecordsSection = false;
+                        let inserted = false;
+                        const formattedRecords = recordsToAdd
+                            .map((rec) => {
+                            const docId = this.getNextDocId();
+                            this.indexes.primary[docId] = rec;
+                            this.indexRecord(docId, rec);
+                            return `#${docId} -> ${this.formatData(rec)}`;
+                        })
+                            .join('\n');
+                        for await (const chunk of readStream) {
+                            const lines = chunk.split('\n');
+                            for (const line of lines) {
+                                if (line.trim() === '@records') {
+                                    insideRecordsSection = true;
+                                    writeStream.write(`${line}\n`);
+                                    continue;
+                                }
+                                if (insideRecordsSection && line.trim() === '@end') {
+                                    if (!inserted) {
+                                        writeStream.write(`${formattedRecords}\n`);
+                                        inserted = true;
+                                    }
+                                    insideRecordsSection = false;
+                                }
+                                writeStream.write(`${line}\n`);
+                            }
+                        }
+                        if (!inserted) {
+                            throw new Error('Could not find the @records section or @end tag in the file.');
+                        }
+                        readStream.close();
+                        writeStream.end();
+                        await fs.promises.rename(tempFilePath, file);
+                    });
+                    resolve(true);
+                }
+                catch (err) {
+                    reject(err);
+                }
+            });
+        });
+    }
+    async update(file, query, newData, options = {}) {
+        const { upsert = false, doc = Infinity } = options;
+        return new Promise((resolve, reject) => {
+            this.workerPool.addTask(async () => {
+                try {
+                    if (!this.indexes || !this.indexes.primary) {
+                        throw new Error('Indexes are not built. Please call buildIndex() first.');
+                    }
+                    const queryResults = await this.queryClass.query(query);
+                    if (queryResults.results.length === 0) {
+                        if (upsert) {
+                            await this.addRecord(file, newData);
+                            resolve({
+                                acknowledge: true,
+                                results: [],
+                                message: 'No matching document found. New record added.',
+                            });
+                            return;
+                        }
+                        else {
+                            resolve({
+                                acknowledge: false,
+                                results: [],
+                                message: 'No matching document found.',
+                            });
+                            return;
+                        }
+                    }
+                    await this.withLock(file, async () => {
+                        const tempFilePath = `${file}.tmp`;
+                        const readStream = fs.createReadStream(file, { encoding: 'utf-8' });
+                        const writeStream = fs.createWriteStream(tempFilePath, { encoding: 'utf-8' });
+                        let currentRecord = '';
+                        let updatingRecord = false;
+                        let updated = false;
+                        let foundEndTag = false;
+                        for await (const chunk of readStream) {
+                            const lines = chunk.split('\n');
+                            for (const line of lines) {
+                                const trimmedLine = line.trim();
+                                const recordMatch = /^#(\d+)\s*->\s*(.*)/.exec(trimmedLine);
+                                if (recordMatch) {
+                                    if (updatingRecord) {
+                                        writeStream.write(currentRecord + '\n');
+                                    }
+                                    currentRecord = trimmedLine;
+                                    const docId = parseInt(recordMatch[1], 10);
+                                    if (queryResults.results.some((result) => result.docNumber === docId.toString())) {
+                                        updatingRecord = true;
+                                        continue;
+                                    }
+                                }
+                                if (updatingRecord) {
+                                    if (trimmedLine === '@end') {
+                                        // Apply operations and write the updated record
+                                        let updatedRecord = currentRecord;
+                                        if (newData) {
+                                            updatedRecord = this.applyOperations(updatedRecord, newData);
+                                        }
+                                        writeStream.write(updatedRecord + '\n');
+                                        updatingRecord = false; // Reset flag
+                                        updated = true;
+                                        foundEndTag = true; // We found @end for this record
+                                    }
+                                    else {
+                                        currentRecord += '\n' + trimmedLine; // Accumulate multi-line record
+                                    }
+                                }
+                                else {
+                                    writeStream.write(line + '\n');
+                                }
+                            }
+                        }
+                        if (updatingRecord) {
+                            let updatedRecord = currentRecord;
+                            Object.keys(newData).forEach(key => {
+                                const regex = new RegExp(`${key}\\([^)]+\\)`, 'g');
+                                const newValue = this.formatData({ [key]: newData[key] }).trim().slice(key.length + 1, -2);
+                                updatedRecord = updatedRecord.replace(regex, `${key}(${newValue})`);
+                            });
+                            writeStream.write(updatedRecord + '\n');
+                            updated = true;
+                        }
+                        writeStream.write('@end\n');
+                        readStream.close();
+                        writeStream.end();
+                        if (updated) {
+                            await fs.promises.rename(tempFilePath, file);
+                            resolve({
+                                acknowledge: true,
+                                results: [],
+                                message: 'Document updated successfully.',
+                            });
+                        }
+                        else {
+                            resolve({
+                                acknowledge: false,
+                                results: [],
+                                message: 'No matching document found to update.',
+                            });
+                        }
+                    });
+                }
+                catch (err) {
+                    reject({
+                        acknowledge: false,
+                        results: [],
+                        errorMessage: err instanceof Error ? err.stack || err.message : 'Unknown error',
+                    });
+                }
+            });
+        });
+    }
+    /**
+     * Executes an action with a file lock to ensure safe access.
+     * @param filePath The file to lock.
+     * @param action The action to execute while the file is locked.
+     */
+    async withLock(filePath, action) {
+        const release = await lockfile.lock(filePath, { retries: 5 });
+        try {
+            await action();
+        }
+        finally {
+            await release();
+        }
+    }
+    /**
+     * Indexes a record by its document ID.
+     * @param docId The document ID.
+     * @param record The record to index.
+     */
+    indexRecord(docId, record) {
+        Object.keys(record).forEach((key) => {
+            const value = record[key];
+            let fieldType;
+            if (typeof value === 'string') {
+                fieldType = 'String';
+            }
+            else if (typeof value === 'number') {
+                fieldType = 'Number';
+            }
+            else if (typeof value === 'boolean') {
+                fieldType = 'Boolean';
+            }
+            else if (value === null) {
+                fieldType = 'Null';
+            }
+            else if (Buffer.isBuffer(value)) {
+                fieldType = 'Buffer';
+            }
+            else if (value instanceof Uint8Array) {
+                fieldType = 'Uint8Array';
+            }
+            else if (value instanceof Date) {
+                fieldType = 'Date';
+            }
+            else if (Array.isArray(value)) {
+                if (value.every(item => typeof item === 'object')) {
+                    fieldType = 'ObjectArray';
+                }
+                else if (value.every(item => typeof item === 'string')) {
+                    fieldType = 'StringArray';
+                }
+                else if (value.every(item => typeof item === 'number')) {
+                    fieldType = 'NumberArray';
+                }
+                else {
+                    fieldType = 'AnyArray';
+                }
+            }
+            else if (typeof value === 'object') {
+                fieldType = 'Object';
+            }
+            else {
+                fieldType = 'Unknown';
+            }
+            const field = { key, value, type: fieldType };
+            this.indexField(docId, field, this.indexes.inverted);
+        });
+    }
+    /**
+     * Gets the next document ID for a new record.
+     * @param index The index offset for batch operations.
+     * @returns The next document ID.
+     */
+    getNextDocId() {
+        const primaryKeys = Object.keys(this.indexes?.primary || {});
+        const docIds = primaryKeys
+            .map((key) => parseInt(key))
+            .filter((id) => !isNaN(id));
+        const maxDocId = docIds.length ? Math.max(...docIds) : -1;
+        return maxDocId + 1;
+    }
+    /**
+     * Formats a record into a string representation.
+     * @param data The record to format.
+     * @returns The formatted string.
+     */
+    formatData(data) {
+        let formattedData = '';
+        for (const [key, value] of Object.entries(data)) {
+            if (Array.isArray(value)) {
+                formattedData += `${key}[`;
+                value.forEach((item, index) => {
+                    if (typeof item === 'object' && item !== null) {
+                        formattedData += ` _${index}{ ${this.formatData(item)} }; `;
+                    }
+                    else if (typeof item === 'string') {
+                        formattedData += ` _${index}("${item}"); `; // Enclose strings in quotes
+                    }
+                    else {
+                        formattedData += ` _${index}(${item}); `;
+                    }
+                });
+                formattedData += ']; ';
+            }
+            else if (typeof value === 'string') {
+                formattedData += `${key}("${value}"); `;
+            }
+            else if (typeof value === 'number') {
+                formattedData += `${key}(${value}); `;
+            }
+            else if (typeof value === 'boolean') {
+                formattedData += `${key}(${value ? 'TRUE' : 'FALSE'}); `;
+            }
+            else if (value instanceof Date) {
+                formattedData += `${key}(${value.toISOString()}); `;
+            }
+            else if (value === null) {
+                formattedData += `${key}(NULL); `;
+            }
+            else if (typeof value === 'object') {
+                formattedData += `${key}{ ${this.formatData(value)} }; `;
+            }
+        }
+        return formattedData;
+    }
+    applyOperations(record, operations) {
+        let updatedRecord = record;
+        Object.keys(operations).forEach(operation => {
+            switch (operation) {
+                case '$set':
+                    Object.keys(operations.$set).forEach(key => {
+                        const regex = new RegExp(`${key}\\([^)]+\\)`, 'g'); // Match the field format
+                        const newValue = this.formatData({ [key]: operations.$set[key] }).trim().slice(key.length + 1, -2);
+                        if (updatedRecord.match(regex)) {
+                            updatedRecord = updatedRecord.replace(regex, `${key}(${newValue})`);
+                        }
+                        else {
+                            updatedRecord += ` ${key}(${newValue})`;
+                        }
+                    });
+                    break;
+                // Future operations like $unset, $inc, etc., can be added here
+                default:
+                    throw new Error(`Unsupported operation: ${operation}`);
+            }
+        });
+        return updatedRecord;
+    }
+}
+exports.nuv_crud = nuv_crud;
+//# sourceMappingURL=nuv_crud.js.map

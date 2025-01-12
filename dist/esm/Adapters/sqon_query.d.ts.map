@@ -1,1 +1,0 @@
-{"version":3,"file":"sqon_query.d.ts","sourceRoot":"","sources":["../../../lib/Adapters/sqon_query.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,OAAO,EAAE,MAAM,cAAc,CAAC;AACvC,OAAO,EAAE,YAAY,EAAE,cAAc,EAAE,MAAM,iBAAiB,CAAC;AAI/D,qBAAa,UAAW,SAAQ,OAAO;IACrC,OAAO,CAAC,MAAM,CAAS;gBAEX,MAAM,EAAE,YAAY;IAKnB,OAAO,CAAC,QAAQ,EAAE,MAAM,GAAG,OAAO,CAAC,cAAc,CAAC,GAAG,EAAE,CAAC,CAAC;CA2DvE"}
